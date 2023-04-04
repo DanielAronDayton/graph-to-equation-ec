@@ -13,18 +13,14 @@ toward arbitrarily large and complex programs.
 
 This assignment is mostly open-ended,
 with a couple restrictions:
-
-# DO NOT MODIFY >>>>
-Do not edit the sections between these marks below.
-# <<<< DO NOT MODIFY
 """
 
 # %%
 import random
 from typing import TypedDict
 from typing import Optional
-import copy
 import math
+
 
 # import json
 
@@ -33,12 +29,10 @@ import math
 # import subprocess
 
 
-# DO NOT MODIFY >>>>
 # First, what should our representation look like?
 # Is there any modularity in adjacency?
 # What mechanisms capitalize on such modular patterns?
-OPERATORS = "+-/*"
-
+OPERATORS = "+-/*^"
 
 class Node:
     """
@@ -209,28 +203,32 @@ def put_an_x_in_it(formula: str) -> str:
     return " ".join(formula_arr)
 
 
-def gen_rand_prefix_code(depth_limit: int, rec_depth: int = 0) -> str:
+def gen_rand_prefix_code(depth_limit: int, rec_depth: int = 0, var_chance: float = 0) -> str:
     """
     Generates one small formula,
     from OPERATORS and ints from -100 to 200
     """
     rec_depth += 1
     if rec_depth < depth_limit:
-        if random.random() < 0.9:
+        if random.random() < 0.8:
             return (
                 random.choice(OPERATORS)
                 + " "
-                + gen_rand_prefix_code(depth_limit, rec_depth)
+                + gen_rand_prefix_code(depth_limit, rec_depth, var_chance)
                 + " "
-                + gen_rand_prefix_code(depth_limit, rec_depth)
+                + gen_rand_prefix_code(depth_limit, rec_depth, var_chance)
             )
+        elif random.random() < var_chance:
+            return "x"
         else:
             return str(random.randint(-100, 100))
+    elif random.random() < var_chance:
+        return "x"
     else:
         return str(random.randint(-100, 100))
 
 
-# <<<< DO NOT MODIFY
+
 
 
 def initialize_pop(pop_size: int, depth: int = 2) -> Population:
@@ -329,6 +327,34 @@ def _tree_set_nth(
     else:
         return None, count - 1
 
+def tree_deep_copy(root: Optional[Node]) -> Optional[Node]:
+    if root:
+        return Node(
+            data=root.data,
+            left=tree_deep_copy(root.left),
+            right=tree_deep_copy(root.right),
+        )
+    else:
+        return None
+
+def tree_eval_node(root: Optional[Node], x: float) -> float:
+    if root:
+        match root.data:
+            case '+':
+                return tree_eval_node(root.left, x) + tree_eval_node(root.right, x)
+            case '-':
+                return tree_eval_node(root.left, x) - tree_eval_node(root.right, x)
+            case '*':
+                return tree_eval_node(root.left, x) * tree_eval_node(root.right, x)
+            case '/':
+                return tree_eval_node(root.left, x) / tree_eval_node(root.right, x)
+            case '^':
+                return tree_eval_node(root.left, x) ** tree_eval_node(root.right, x)
+            case 'x':
+                return x
+            case other:
+                return float(root.data)
+    pass
 
 def recombine_pair(parent1: Individual, parent2: Individual) -> Population:
     """
@@ -379,14 +405,19 @@ def recombine_group(parents: Population, recombine_rate: float) -> Population:
     Calls:          Basic python, random.random~n/2, recombine pair-n
     """
     pop = []
+    weights = []
+    for i in parents:
+        weights.append(100.0 / i["fitness"])
 
-    for i in range(int(len(parents) / 2)):  # [0 : len(parents) - 1 : 2]:
+
+    for i in range(int(len(parents))):  # [0 : len(parents) - 1 : 2]:
+
         if random.random() < recombine_rate:
-            temp = recombine_pair(parents[i], parents[i + int(len(parents) / 2)])
+            temp = recombine_pair(parents[i], random.choices(parents, weights=weights, k=1)[0])
             pop += temp
         else:
             pop.append(parents[i])
-            pop.append(parents[i + int(len(parents) / 2)])
+            # pop.append(parents[i + int(len(parents) / 2)])
         # for j in range(len(parents))[i + 1 :]:
         #    if random.random() < recombine_rate:
         #        temp = recombine_pair(parents[i], parents[j])
@@ -408,39 +439,39 @@ def mutate_individual(parent: Individual, mutate_rate: float) -> Individual:
     Calls:          Basic python, random,choice-1,
     Example doctest:
     """
-
-    as_string = parse_tree_return(parent["genome"])
-    new_genome: Optional[Node]
+    # TODO: Add subtle mutation and change depth limit to current node depth + 1
+    # as_string = parse_tree_return(parent["genome"])
+    new_genome: Optional[Node] = tree_deep_copy(parent["genome"])
     while random.random() < mutate_rate:
-        new_genome = parse_expression(as_string)
+        # new_genome = parse_expression(as_string)
         genome_len = tree_len(new_genome)
         n = random.randint(0, genome_len)
         # subtree = tree_get_nth(genome_copy, n)
         new_genome = tree_set_nth(
-            new_genome, parse_expression(gen_rand_prefix_code(depth_limit=2)), n
+            new_genome, parse_expression(gen_rand_prefix_code(depth_limit=3, var_chance=0.25)), n
         )
 
-        if new_genome:
-            as_string = parse_tree_return(new_genome)
-            num_x = as_string.count("x")
-            if num_x == 0:
-                as_string = put_an_x_in_it(as_string)
-            elif num_x > 1:
-                preserve = random.randint(0, num_x)
-                instances = 0
-                as_arr = as_string.split()
-                for i in range(num_x):
-                    if as_arr[i] == "x":
-                        if instances != preserve:
-                            as_arr[i] = gen_rand_prefix_code(2)
-                        instances += 1
-                as_string = "".join(as_arr)
+        # if new_genome:
+        #     as_string = parse_tree_return(new_genome)
+        #     num_x = as_string.count("x")
+        #     if num_x == 0:
+        #         as_string = put_an_x_in_it(as_string)
+        #     elif num_x > 1:
+        #         preserve = random.randint(0, num_x)
+        #         instances = 0
+        #         as_arr = as_string.split()
+        #         for i in range(num_x):
+        #             if as_arr[i] == "x":
+        #                 if instances != preserve:
+        #                     as_arr[i] = gen_rand_prefix_code(2)
+        #                 instances += 1
+        #         as_string = "".join(as_arr)
         mutate_rate *= 0.8
 
         # print("Debug1 ----", parse_tree_return(parent["genome"]))
         # print("Debug2 ====", as_string)
 
-    return initialize_individual(as_string, 0)
+    return {"genome": new_genome, "fitness": 0}
 
 
 def mutate_group(children: Population, mutate_rate: float) -> Population:
@@ -463,7 +494,7 @@ def mutate_group(children: Population, mutate_rate: float) -> Population:
     return pop
 
 
-# DO NOT MODIFY >>>>
+
 def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
     """
     Purpose:        Computes and modifies the fitness for one individual
@@ -479,32 +510,53 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
     """
     fitness = 0
     errors = []
+    base_eval_string = parse_tree_return(individual["genome"])
     for sub_eval in io_data:
-        eval_string = parse_tree_return(individual["genome"]).replace(
-            "x", str(sub_eval["input1"])
-        )
+        if 0:
+            eval_string = base_eval_string.replace("x", str(sub_eval["input1"]))
 
-        # In clojure, this is really slow with subprocess
-        # eval_string = "( float " + eval_string + ")"
-        # returnobject = subprocess.run(
-        #     ["clojure", "-e", eval_string], capture_output=True
-        # )
-        # result = float(returnobject.stdout.decode().strip())
+            # In clojure, this is really slow with subprocess
+            # eval_string = "( float " + eval_string + ")"
+            # returnobject = subprocess.run(
+            #     ["clojure", "-e", eval_string], capture_output=True
+            # )
+            # result = float(returnobject.stdout.decode().strip())
 
-        # In python, this is MUCH MUCH faster:
-        try:
-            y = eval(prefix_to_infix(eval_string))
-        except ZeroDivisionError:
-            y = math.inf
+            # In python, this is MUCH MUCH faster:
+            try:
+                y = eval(prefix_to_infix(eval_string).replace("^", "**"))
+            except OverflowError:
+                y = math.inf
+            except ZeroDivisionError:
+                y = math.inf
 
-        errors.append(abs(sub_eval["output1"] - y))
-    # Higher errors is bad, and longer strings is bad
-    fitness = sum(errors) + len(eval_string.split())
+            try:
+                errors.append(abs(sub_eval["output1"] - y))
+            except OverflowError:
+                errors.append(math.inf)
+        else:
+            try:
+                y = tree_eval_node(individual["genome"], float(str(sub_eval["input1"])))
+            except OverflowError:
+                y = math.inf
+            except ZeroDivisionError:
+                y = math.inf
+
+            try:
+                errors.append(abs(sub_eval["output1"] - y))
+            except OverflowError:
+                errors.append(math.inf)
+    # Higher errors is bad, longer strings is bad, and more than 1 x is bad (For now)
+    errors = sum(errors)
+    if errors == 0:
+        fitness = 1
+    else:
+        fitness = 1 + errors + tree_len(individual["genome"]) * 0.2 + ((base_eval_string.count("x")-1) ** 2) # + len(eval_string.split()) * 0.1
     # Higher fitness is worse
     individual["fitness"] = fitness
 
 
-# <<<< DO NOT MODIFY
+
 
 
 def evaluate_group(individuals: Population, io_data: IOdata) -> None:
@@ -573,7 +625,7 @@ def survivor_select(individuals: Population, pop_size: int) -> Population:
     return individuals[0:pop_size]
 
 
-def evolve(io_data: IOdata, pop_size: int = 200) -> Population:
+def evolve(io_data: IOdata, pop_size: int = 500) -> Population:
     """
     Purpose:        A whole EC run, main driver
     Parameters:     The evolved population of solutions
@@ -606,14 +658,14 @@ def evolve(io_data: IOdata, pop_size: int = 200) -> Population:
         parse_tree_return(population[0]["genome"]),
     )
 
-    while best_fitness > goal_fitness and i < 2000 and time_without_improvement < 200:
+    while best_fitness > goal_fitness and i < 2000 and time_without_improvement < 300:
         # mutate_rate = math.log(best_fitness + 1 + time_without_improvement) / 2
-        mutate_rate = (best_fitness) / (best_fitness + 10)
+        mutate_rate = (best_fitness) / (best_fitness + 10.0)
         spontaneous = initialize_pop(pop_size=(int)(pop_size / 4), depth=4)
         evaluate_group(individuals=spontaneous, io_data=io_data)
         parents = parent_select(individuals=population, number=pop_size) + spontaneous
         rank_group(parents)
-        children = recombine_group(parents=parents, recombine_rate=mutate_rate)
+        children = recombine_group(parents=parents, recombine_rate=mutate_rate / 2)
         mutants = mutate_group(children=children, mutate_rate=mutate_rate)
         evaluate_group(individuals=mutants, io_data=io_data)
         everyone = population + mutants
@@ -642,7 +694,7 @@ def evolve(io_data: IOdata, pop_size: int = 200) -> Population:
         i,
         "iterations (",
         time_without_improvement,
-        "withut improvement ) and a final fitness of",
+        "without improvement ) and a final fitness of",
         population[0]["fitness"],
     )
     return population
@@ -651,9 +703,9 @@ def evolve(io_data: IOdata, pop_size: int = 200) -> Population:
 # Seed for base grade.
 # For the exploratory competition points (last 10),
 # comment this one line out if you want, but put it back please.
-seed = True
+seed = False
 
-# DO NOT MODIFY >>>>
+
 if __name__ == "__main__":
     divider = "===================================================="
     # Execute doctests to protect main:
@@ -662,36 +714,51 @@ if __name__ == "__main__":
     # doctest.testmod()
     # doctest.testmod(verbose=True)
 
-    if seed:
-        random.seed(42)
+    for i in range(10):
 
-    print(divider)
-    print("Number of possible genetic programs: infinite...")
-    print("Lower fitness is better.")
-    print(divider)
+        if seed:
+            random.seed(42+i)
 
-    X = list(range(-10, 110, 10))
-    Y = [(x * (9 / 5)) + 32 for x in X]
-    # data = [{"input1": x, "output1": y} for x, y in zip(X, Y)]
-    # mypy wanted this:
-    data = [initialize_data(input1=x, output1=y) for x, y in zip(X, Y)]
+        print(divider)
+        print("Cycle number: ", i + 1)
+        print("Lower fitness is better.")
+        print(divider)
 
-    # Correct:
-    print("Example of celcius to farenheight:")
-    ind1 = initialize_individual("( + ( * x ( / 9 5 ) ) 32 )", 0)
-    evaluate_individual(ind1, data)
-    print_tree(ind1["genome"])
-    print("Fitness", ind1["fitness"])
+        print("Equation to be found:")
+        
 
-    # Yours
-    train = data[: int(len(data) / 2)]
-    test = data[int(len(data) / 2) :]
-    population = evolve(train)
-    evaluate_individual(population[0], test)
-    population[0]["fitness"]
+        X = list(range(-10, 110, 10))
+        repeat = True
+        while repeat:
+            genome = gen_rand_prefix_code(depth_limit=4)
+            genome = put_an_x_in_it(genome)
+            ind1 = initialize_individual(genome, 0)
+            repeat = False
+            try:
+                Y = [tree_eval_node(ind1["genome"], x) for x in X]
+            except OverflowError:
+                repeat = True
+            except ZeroDivisionError:
+                repeat = True
+        # data = [{"input1": x, "output1": y} for x, y in zip(X, Y)]
+        # mypy wanted this:
+        data = [initialize_data(input1=x, output1=y) for x, y in zip(X, Y)]
 
-    print("Here is the best program:")
-    parse_tree_print(population[0]["genome"])
-    print("And it's fitness:")
-    print(population[0]["fitness"])
-# <<<< DO NOT MODIFY
+        # Correct:
+        
+        evaluate_individual(ind1, data)
+        print_tree(ind1["genome"])
+        print("Fitness", ind1["fitness"])
+
+        # Yours
+        train = data[: int(len(data) / 2)]
+        test = data[int(len(data) / 2) :]
+        population = evolve(train)
+        evaluate_individual(population[0], test)
+        population[0]["fitness"]
+
+        print("Here is the best program:")
+        parse_tree_print(population[0]["genome"])
+        print("And it's fitness:")
+        print(population[0]["fitness"])
+
