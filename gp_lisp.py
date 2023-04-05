@@ -16,13 +16,15 @@ with a couple restrictions:
 """
 
 # %%
-import random
 from typing import TypedDict
 from typing import Optional
-import math
-import numpy as np
 
-# import json
+import random
+import math
+import numpy
+
+import requests
+import json
 
 # import datetime
 # import subprocess
@@ -33,18 +35,27 @@ import numpy as np
 # What mechanisms capitalize on such modular patterns?
 OPERATORS = "+-/*^"
 VARIABLES = "xsgtf"
+THROW_TYPES = ["bh1", "bh2", "bh3", "fh1", "fh2", "fh3"]
+DISC_IDS = ["1105", "566", "243", "574", "402", "348", "981"]#["1105", "566", "243", "991", "1173", "1228", "660", "788", "329", "779", "574", "402", "348", "981"]
+STARTING_POINTS = ["( + ( * ( / x 9.031515991700422 ) ( * ( + -2.151720022561741 f ) ( + g ( - ( + 14.222761143082238 ( / ( + 0.28913793978991253 ( * 5.202877215112656 16.129873997189623 ) ) ( * -8.982764366988988 ( / -9.805042530840135 4.158731039736966 ) ) ) ) ( - f 9.039572452420636 ) ) ) ) ) ( - s ( * 9.327831166869633 -16.532704823244007 ) ) )",
+                   "x",
+                   "x",
+                   "x",
+                   "x",
+                   "x"]
 
 MAX_ITERATIONS = 2000
 MAX_TIME_WITHOUT_IMPROVEMENT = 300
 DEFAULT_POP_SIZE = 200
 DEFAULT_DEPTH = 2
-MUTATE_RATE_STEEPNESS = 10.0
-MUTATE_DEPTH = 3
-SPONTANEOUS_PERCENTAGE = 0.25
+MAJOR_MUTATE_RATE_STEEPNESS = 200.0
+MINOR_MUTATE_RATE_STEEPNESS = 100.0
+RECOMBINE_RATE_STEEPNESS = 1000.0
+MUTATE_DEPTH = 4
+SPONTANEOUS_PERCENTAGE = 0.1
 SPONTANEOUS_DEPTH = 4
-RECOMBINE_RATE_MULTIPLIER = 0.5
 ERROR_PRECISION = 0.01
-GENOME_LEN_WEIGHT = 0.2
+GENOME_LEN_WEIGHT = 0.4
 
 
 class Node:
@@ -357,18 +368,18 @@ def tree_eval_node(root: Optional[Node], vars: list[float]) -> float:
     if root:
         match root.data:
             case '+':
-                return np.add( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
+                return numpy.add( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '-':
-                return np.subtract( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
+                return numpy.subtract( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '*':
-                return np.multiply( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
+                return numpy.multiply( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '/':
-                return np.divide( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
+                return numpy.divide( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '^':
-                if tree_eval_node(root.left, vars) < 0: # Negative to the power of a fraction results in a complevars number, which I don't want
-                    test = -np.float_power(np.abs(tree_eval_node(root.left, vars)), tree_eval_node(root.right, vars))
+                if False: #tree_eval_node(root.left, vars) < 0: # Negative to the power of a fraction results in a complevars number, which I don't want
+                    test = -numpy.float_power(numpy.abs(tree_eval_node(root.left, vars)), tree_eval_node(root.right, vars))
                 else:
-                    test = np.float_power(tree_eval_node(root.left, vars), tree_eval_node(root.right, vars))
+                    test = numpy.float_power(tree_eval_node(root.left, vars), tree_eval_node(root.right, vars))
                 if test == math.nan:
                     test = math.inf
                 return test
@@ -590,10 +601,10 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
         else:
             try:
                 y = tree_eval_node(individual["genome"], sub_eval["input1"])
-            except OverflowError:
-                y = math.inf
-            except ZeroDivisionError:
-                y = math.inf
+            # except OverflowError:
+            #     y = math.inf
+            # except ZeroDivisionError:
+            #     y = math.inf
             except FloatingPointError:
                 y = math.inf
 
@@ -610,7 +621,7 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
     if errors < ERROR_PRECISION:
         fitness = 1
     else:
-        fitness = 1 + errors + tree_len(individual["genome"]) * GENOME_LEN_WEIGHT + ((base_eval_string.count("x")-1) ** 2) # + len(eval_string.split()) * 0.1
+        fitness = 1 + errors + tree_len(individual["genome"]) * GENOME_LEN_WEIGHT # + len(eval_string.split()) * 0.1
     # Higher fitness is worse
     individual["fitness"] = fitness
 
@@ -684,7 +695,7 @@ def survivor_select(individuals: Population, pop_size: int) -> Population:
     return individuals[0:pop_size]
 
 
-def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE) -> Population:
+def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE, starting_point: str = VARIABLES[0]) -> Population:
     """
     Purpose:        A whole EC run, main driver
     Parameters:     The evolved population of solutions
@@ -701,6 +712,7 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE) -> Population:
     # Type 'n' to 'next' over
     # Type 'f' or 'r' to finish/return a function call and go back to caller
     population = initialize_pop(pop_size=pop_size)
+    population.append(initialize_individual(starting_point, 0))
     evaluate_group(individuals=population, io_data=io_data)
     rank_group(individuals=population)
     best_fitness = population[0]["fitness"]
@@ -719,13 +731,16 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE) -> Population:
 
     while best_fitness > goal_fitness and i < MAX_ITERATIONS and time_without_improvement < MAX_TIME_WITHOUT_IMPROVEMENT:
         # mutate_rate = math.log(best_fitness + 1 + time_without_improvement) / 2
-        mutate_rate = (best_fitness) / (best_fitness + MUTATE_RATE_STEEPNESS)
+        major_mutate_rate = (best_fitness) / (best_fitness + MAJOR_MUTATE_RATE_STEEPNESS)
+        minor_mutate_rate = (best_fitness) / (best_fitness + MINOR_MUTATE_RATE_STEEPNESS)
+        recombine_rate = (best_fitness) / (best_fitness + RECOMBINE_RATE_STEEPNESS)
+
         spontaneous = initialize_pop(pop_size=(int)(pop_size * SPONTANEOUS_PERCENTAGE), depth=4)
         evaluate_group(individuals=spontaneous, io_data=io_data)
         parents = parent_select(individuals=population, number=pop_size) + spontaneous
         rank_group(parents)
-        children = recombine_group(parents=parents, recombine_rate=mutate_rate / RECOMBINE_RATE_MULTIPLIER)
-        mutants = mutate_group(children=children, minor_mutate_rate=mutate_rate, major_mutate_rate=mutate_rate)
+        children = recombine_group(parents=parents, recombine_rate=recombine_rate)
+        mutants = mutate_group(children=children, minor_mutate_rate=minor_mutate_rate, major_mutate_rate=major_mutate_rate)
         evaluate_group(individuals=mutants, io_data=io_data)
         everyone = population + mutants
         rank_group(individuals=everyone)
@@ -762,7 +777,7 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE) -> Population:
 # Seed for base grade.
 # For the exploratory competition points (last 10),
 # comment this one line out if you want, but put it back please.
-seed = True
+seed = False
 
 
 if __name__ == "__main__":
@@ -772,59 +787,48 @@ if __name__ == "__main__":
 
     # doctest.testmod()
     # doctest.testmod(verbose=True)
-    np.seterr(all="raise")
-    for i in range(10):
+
+    numpy.seterr(all="raise")
+
+    for i in range(len(THROW_TYPES)):
 
         if seed:
             random.seed(35+i)
 
         print(divider)
-        print("Cycle number: ", i + 1)
+        print("Throw type: ", THROW_TYPES[i])
         print("Lower fitness is better.")
         print(divider)
 
-        print("Equation to be found:")
-        
-        varS = random.randint(1, 14)
-        varG = random.randint(1, 7)
-        varT = random.randint(-5, 1)
-        varF = random.randint(0, 5)
+        all_data = []
 
-        X = list(range(-10, 110, 10))
-        repeat = True
-        
-        while repeat:
-            genome = gen_rand_prefix_code(depth_limit=5)
-            genome = populate_with_variables(genome)
-            ind1 = initialize_individual(genome, 0)
-            repeat = False
-            try:
-                Y = [tree_eval_node(ind1["genome"], [x, varS, varG, varT, varF]) for x in X]
-            except OverflowError:
-                repeat = True
-            except ZeroDivisionError:
-                repeat = True
-            except FloatingPointError:
-                repeat = True
-        # data = [{"input1": x, "output1": y} for x, y in zip(X, Y)]
-        # mypy wanted this:
-        data = [initialize_data(input1=[x, varS, varG, varT, varF], output1=y) for x, y in zip(X, Y)]
+        for disc in DISC_IDS:
+            response = requests.get('https://flightcharts.dgputtheads.com/discdata/' + disc)
+            if response.ok:
+                data = json.loads(json.loads(response.text)["data"])
+                speed = data["speed"]
+                glide = data["glide"]
+                turn = data["turn"]
+                fade = data["fade"]
+                for point in data[THROW_TYPES[i]]:
+                    all_data.append(initialize_data([point["x"], speed, glide, turn, fade], point["y"]))
+                print("Importing data for disc ", disc, ", ", all_data[len(all_data) - 1])
+            else:
+                print("** Failed to import data for disc ", disc, " **")
 
-        # Correct:
         
-        evaluate_individual(ind1, data)
-        print_tree(ind1["genome"])
-        print("Fitness", ind1["fitness"])
-
-        # Yours
-        train = data[: int(len(data) / 2)]
-        test = data[int(len(data) / 2) :]
-        population = evolve(train)
-        evaluate_individual(population[0], test)
+        # train = all_data[: int(len(all_data) / 2)]
+        # test = all_data[int(len(all_data) / 2) :]
+        population = evolve(all_data, starting_point = STARTING_POINTS[i])
+        evaluate_individual(population[0], all_data)
         population[0]["fitness"]
+
+        print(divider)
 
         print("Here is the best program:")
         parse_tree_print(population[0]["genome"])
+        print("And as infix:")
+        print(prefix_to_infix(parse_tree_return(population[0]["genome"])))
         print("And it's fitness:")
         print(population[0]["fitness"])
 
