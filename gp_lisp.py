@@ -20,6 +20,7 @@ import random
 from typing import TypedDict
 from typing import Optional
 import math
+import numpy as np
 
 
 # import json
@@ -33,6 +34,20 @@ import math
 # Is there any modularity in adjacency?
 # What mechanisms capitalize on such modular patterns?
 OPERATORS = "+-/*^"
+VARIABLES = "x"
+
+MAX_ITERATIONS = 2000
+MAX_TIME_WITHOUT_IMPROVEMENT = 300
+DEFAULT_POP_SIZE = 200
+DEFAULT_DEPTH = 2
+MUTATE_RATE_STEEPNESS = 10.0
+MUTATE_DEPTH = 3
+SPONTANEOUS_PERCENTAGE = 0.25
+SPONTANEOUS_DEPTH = 4
+RECOMBINE_RATE_MULTIPLIER = 0.5
+ERROR_PRECISION = 0.01
+GENOME_LEN_WEIGHT = 0.2
+
 
 class Node:
     """
@@ -221,11 +236,11 @@ def gen_rand_prefix_code(depth_limit: int, rec_depth: int = 0, var_chance: float
         elif random.random() < var_chance:
             return "x"
         else:
-            return str(random.randint(-100, 100))
+            return str(random.uniform(-20.0, 20.0))
     elif random.random() < var_chance:
         return "x"
     else:
-        return str(random.randint(-100, 100))
+        return str(random.uniform(-20.0, 20.0))
 
 
 
@@ -244,7 +259,7 @@ def initialize_pop(pop_size: int, depth: int = 2) -> Population:
     """
     pop = []
     for i in range(pop_size):
-        genome = gen_rand_prefix_code(depth_limit=2)
+        genome = gen_rand_prefix_code(depth_limit=DEFAULT_DEPTH)
         genome = put_an_x_in_it(genome)
         # for j in range(len(example_genome)):
         #    genome += random.choice(string.ascii_letters + " ")
@@ -349,6 +364,11 @@ def tree_eval_node(root: Optional[Node], x: float) -> float:
             case '/':
                 return tree_eval_node(root.left, x) / tree_eval_node(root.right, x)
             case '^':
+                # if tree_eval_node(root.left, x) < 0: # Negative to the power of a fraction results in a complex number, which I don't want
+                #     test = -np.float_power(np.abs(tree_eval_node(root.left, x)), tree_eval_node(root.right, x))
+                # else:
+                #     test = np.float_power(tree_eval_node(root.left, x), tree_eval_node(root.right, x))
+                # return test
                 return tree_eval_node(root.left, x) ** tree_eval_node(root.right, x)
             case 'x':
                 return x
@@ -428,7 +448,7 @@ def recombine_group(parents: Population, recombine_rate: float) -> Population:
     return pop
 
 
-def mutate_individual(parent: Individual, mutate_rate: float) -> Individual:
+def major_mutate_individual(parent: Individual, mutate_rate: float) -> Individual:
     """
     Purpose:        Mutate one individual
     Parameters:     One parents as Individual, mutation rate as float (0-1)
@@ -448,7 +468,7 @@ def mutate_individual(parent: Individual, mutate_rate: float) -> Individual:
         n = random.randint(0, genome_len)
         # subtree = tree_get_nth(genome_copy, n)
         new_genome = tree_set_nth(
-            new_genome, parse_expression(gen_rand_prefix_code(depth_limit=3, var_chance=0.25)), n
+            new_genome, parse_expression(gen_rand_prefix_code(depth_limit=MUTATE_DEPTH, var_chance=0.25)), n
         )
 
         # if new_genome:
@@ -473,8 +493,35 @@ def mutate_individual(parent: Individual, mutate_rate: float) -> Individual:
 
     return {"genome": new_genome, "fitness": 0}
 
+def minor_mutate_individual (parent: Individual, mutate_rate: float) -> Individual:
+    """
+    Purpose:        Mutate one individual
+    Parameters:     One parents as Individual, mutation rate as float (0-1)
+    User Input:     no
+    Prints:         no
+    Returns:        One Individual, as a TypedDict[str, int]
+    Modifies:       Nothing
+    Calls:          Basic python, random,choice-1,
+    Example doctest:
+    TODO: Change function descriptions to be accurate
+    """
+    # TODO: Add subtle mutation and change depth limit to current node depth + 1
+    # as_string = parse_tree_return(parent["genome"])
+    new_genome: Optional[Node] = tree_deep_copy(parent["genome"])
+    genome_len = tree_len(new_genome)
+    for i in range(genome_len):
+        # new_genome = parse_expression(as_string)
+        
+        # subtree = tree_get_nth(genome_copy, n)
 
-def mutate_group(children: Population, mutate_rate: float) -> Population:
+        temp_node = tree_get_nth(root=new_genome, n=i, current=[-1])
+        if (random.random() < mutate_rate and temp_node.data not in OPERATORS and temp_node.data not in VARIABLES):
+            temp_node.data = str(float(temp_node.data) + random.uniform(-mutate_rate, mutate_rate))
+
+    return {"genome": new_genome, "fitness": 0}
+
+
+def mutate_group(children: Population, minor_mutate_rate: float, major_mutate_rate: float) -> Population:
     """
     Purpose:        Mutates a whole Population, returns the mutated group
     Parameters:     Population, mutation rate as float (0-1)
@@ -489,7 +536,8 @@ def mutate_group(children: Population, mutate_rate: float) -> Population:
     # i = 0
     for child in children:
         # i += 1
-        pop.append(mutate_individual(child, mutate_rate))  #  * (i / len(children))
+        pop.append(minor_mutate_individual( major_mutate_individual(child, major_mutate_rate), minor_mutate_rate ))  #  * (i / len(children))
+
 
     return pop
 
@@ -548,10 +596,10 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
                 errors.append(math.inf)
     # Higher errors is bad, longer strings is bad, and more than 1 x is bad (For now)
     errors = sum(errors)
-    if errors == 0:
+    if errors < ERROR_PRECISION:
         fitness = 1
     else:
-        fitness = 1 + errors + tree_len(individual["genome"]) * 0.2 + ((base_eval_string.count("x")-1) ** 2) # + len(eval_string.split()) * 0.1
+        fitness = 1 + errors + tree_len(individual["genome"]) * GENOME_LEN_WEIGHT + ((base_eval_string.count("x")-1) ** 2) # + len(eval_string.split()) * 0.1
     # Higher fitness is worse
     individual["fitness"] = fitness
 
@@ -625,7 +673,7 @@ def survivor_select(individuals: Population, pop_size: int) -> Population:
     return individuals[0:pop_size]
 
 
-def evolve(io_data: IOdata, pop_size: int = 500) -> Population:
+def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE) -> Population:
     """
     Purpose:        A whole EC run, main driver
     Parameters:     The evolved population of solutions
@@ -658,15 +706,15 @@ def evolve(io_data: IOdata, pop_size: int = 500) -> Population:
         parse_tree_return(population[0]["genome"]),
     )
 
-    while best_fitness > goal_fitness and i < 2000 and time_without_improvement < 300:
+    while best_fitness > goal_fitness and i < MAX_ITERATIONS and time_without_improvement < MAX_TIME_WITHOUT_IMPROVEMENT:
         # mutate_rate = math.log(best_fitness + 1 + time_without_improvement) / 2
-        mutate_rate = (best_fitness) / (best_fitness + 10.0)
-        spontaneous = initialize_pop(pop_size=(int)(pop_size / 4), depth=4)
+        mutate_rate = (best_fitness) / (best_fitness + MUTATE_RATE_STEEPNESS)
+        spontaneous = initialize_pop(pop_size=(int)(pop_size * SPONTANEOUS_PERCENTAGE), depth=4)
         evaluate_group(individuals=spontaneous, io_data=io_data)
         parents = parent_select(individuals=population, number=pop_size) + spontaneous
         rank_group(parents)
-        children = recombine_group(parents=parents, recombine_rate=mutate_rate / 2)
-        mutants = mutate_group(children=children, mutate_rate=mutate_rate)
+        children = recombine_group(parents=parents, recombine_rate=mutate_rate / RECOMBINE_RATE_MULTIPLIER)
+        mutants = mutate_group(children=children, minor_mutate_rate=mutate_rate, major_mutate_rate=mutate_rate)
         evaluate_group(individuals=mutants, io_data=io_data)
         everyone = population + mutants
         rank_group(individuals=everyone)
@@ -703,7 +751,7 @@ def evolve(io_data: IOdata, pop_size: int = 500) -> Population:
 # Seed for base grade.
 # For the exploratory competition points (last 10),
 # comment this one line out if you want, but put it back please.
-seed = False
+seed = True
 
 
 if __name__ == "__main__":
@@ -717,7 +765,7 @@ if __name__ == "__main__":
     for i in range(10):
 
         if seed:
-            random.seed(42+i)
+            random.seed(57+i)
 
         print(divider)
         print("Cycle number: ", i + 1)
