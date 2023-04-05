@@ -22,10 +22,8 @@ from typing import Optional
 import math
 import numpy as np
 
-
 # import json
 
-# import math
 # import datetime
 # import subprocess
 
@@ -34,7 +32,7 @@ import numpy as np
 # Is there any modularity in adjacency?
 # What mechanisms capitalize on such modular patterns?
 OPERATORS = "+-/*^"
-VARIABLES = "x"
+VARIABLES = "x"#"xsgtf"
 
 MAX_ITERATIONS = 2000
 MAX_TIME_WITHOUT_IMPROVEMENT = 300
@@ -88,7 +86,7 @@ Population = list[Individual]
 class IOpair(TypedDict):
     """Data type for training and testing data"""
 
-    input1: int
+    input1: list[float]
     output1: float
 
 
@@ -178,7 +176,7 @@ def initialize_individual(genome: str, fitness: float) -> Individual:
     return {"genome": parse_expression(genome), "fitness": fitness}
 
 
-def initialize_data(input1: int, output1: float) -> IOpair:
+def initialize_data(input1: list[float], output1: float) -> IOpair:
     """
     For mypy...
     """
@@ -208,13 +206,16 @@ def prefix_to_infix(prefix: str) -> str:
     return stack.pop()
 
 
-def put_an_x_in_it(formula: str) -> str:
+def populate_with_variables(formula: str) -> str:
     formula_arr = formula.split()
-    while True:
-        i = random.randint(0, len(formula_arr) - 1)
-        if formula_arr[i] not in OPERATORS:
-            formula_arr[i] = "x"
-            break
+    for var in VARIABLES:
+        count = 0
+        while var == "x" or count < 50:
+            i = random.randint(0, len(formula_arr) - 1)
+            if formula_arr[i] not in OPERATORS and formula_arr[i] not in VARIABLES:
+                formula_arr[i] = var
+                break
+            count += 1
     return " ".join(formula_arr)
 
 
@@ -260,7 +261,7 @@ def initialize_pop(pop_size: int, depth: int = 2) -> Population:
     pop = []
     for i in range(pop_size):
         genome = gen_rand_prefix_code(depth_limit=DEFAULT_DEPTH)
-        genome = put_an_x_in_it(genome)
+        genome = populate_with_variables(genome)
         # for j in range(len(example_genome)):
         #    genome += random.choice(string.ascii_letters + " ")
         pop.append(initialize_individual(genome, 0))
@@ -352,28 +353,31 @@ def tree_deep_copy(root: Optional[Node]) -> Optional[Node]:
     else:
         return None
 
-def tree_eval_node(root: Optional[Node], x: float) -> float:
+def tree_eval_node(root: Optional[Node], vars: list[float]) -> float:
     if root:
         match root.data:
             case '+':
-                return tree_eval_node(root.left, x) + tree_eval_node(root.right, x)
+                return np.add( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '-':
-                return tree_eval_node(root.left, x) - tree_eval_node(root.right, x)
+                return np.subtract( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '*':
-                return tree_eval_node(root.left, x) * tree_eval_node(root.right, x)
+                return np.multiply( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '/':
-                return tree_eval_node(root.left, x) / tree_eval_node(root.right, x)
+                return np.divide( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '^':
-                # if tree_eval_node(root.left, x) < 0: # Negative to the power of a fraction results in a complex number, which I don't want
-                #     test = -np.float_power(np.abs(tree_eval_node(root.left, x)), tree_eval_node(root.right, x))
-                # else:
-                #     test = np.float_power(tree_eval_node(root.left, x), tree_eval_node(root.right, x))
-                # return test
-                return tree_eval_node(root.left, x) ** tree_eval_node(root.right, x)
-            case 'x':
-                return x
+                if tree_eval_node(root.left, vars) < 0: # Negative to the power of a fraction results in a complevars number, which I don't want
+                    test = -np.float_power(np.abs(tree_eval_node(root.left, vars)), tree_eval_node(root.right, vars))
+                else:
+                    test = np.float_power(tree_eval_node(root.left, vars), tree_eval_node(root.right, vars))
+                if test == math.nan:
+                    test = math.inf
+                return test
+                # return pow(tree_eval_node(root.left, vars), tree_eval_node(root.right, vars))
             case other:
-                return float(root.data)
+                if root.data in VARIABLES:
+                    return vars[VARIABLES.find(root.data)]
+                else:
+                    return float(root.data)
     pass
 
 def recombine_pair(parent1: Individual, parent2: Individual) -> Population:
@@ -561,7 +565,8 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
     base_eval_string = parse_tree_return(individual["genome"])
     for sub_eval in io_data:
         if 0:
-            eval_string = base_eval_string.replace("x", str(sub_eval["input1"]))
+            # TODO: Fix or delete this
+            eval_string = base_eval_string.replace("x", str(sub_eval["input1"][0]))
 
             # In clojure, this is really slow with subprocess
             # eval_string = "( float " + eval_string + ")"
@@ -584,10 +589,12 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
                 errors.append(math.inf)
         else:
             try:
-                y = tree_eval_node(individual["genome"], float(str(sub_eval["input1"])))
+                y = tree_eval_node(individual["genome"], sub_eval["input1"])
             except OverflowError:
                 y = math.inf
             except ZeroDivisionError:
+                y = math.inf
+            except FloatingPointError:
                 y = math.inf
 
             try:
@@ -595,7 +602,11 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
             except OverflowError:
                 errors.append(math.inf)
     # Higher errors is bad, longer strings is bad, and more than 1 x is bad (For now)
-    errors = sum(errors)
+    try:
+        errors = sum(errors)
+    except FloatingPointError:
+        errors = math.inf
+
     if errors < ERROR_PRECISION:
         fitness = 1
     else:
@@ -726,7 +737,7 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE) -> Population:
         if best_fitness != population[0]["fitness"]:
             best_fitness = population[0]["fitness"]
             print(
-                "Iteration number",
+                "\nIteration number",
                 i,
                 "with fitness",
                 best_fitness,
@@ -761,11 +772,11 @@ if __name__ == "__main__":
 
     # doctest.testmod()
     # doctest.testmod(verbose=True)
-
+    np.seterr(all="raise")
     for i in range(10):
 
         if seed:
-            random.seed(57+i)
+            random.seed(420+i)
 
         print(divider)
         print("Cycle number: ", i + 1)
@@ -774,23 +785,29 @@ if __name__ == "__main__":
 
         print("Equation to be found:")
         
+        varS = random.randint(1, 14)
+        varG = random.randint(1, 7)
+        varT = random.randint(-5, 1)
+        varF = random.randint(0, 5)
 
         X = list(range(-10, 110, 10))
         repeat = True
         while repeat:
             genome = gen_rand_prefix_code(depth_limit=4)
-            genome = put_an_x_in_it(genome)
+            genome = populate_with_variables(genome)
             ind1 = initialize_individual(genome, 0)
             repeat = False
             try:
-                Y = [tree_eval_node(ind1["genome"], x) for x in X]
+                Y = [tree_eval_node(ind1["genome"], [x, varS, varG, varT, varF]) for x in X]
             except OverflowError:
                 repeat = True
             except ZeroDivisionError:
                 repeat = True
+            except FloatingPointError:
+                y = math.inf
         # data = [{"input1": x, "output1": y} for x, y in zip(X, Y)]
         # mypy wanted this:
-        data = [initialize_data(input1=x, output1=y) for x, y in zip(X, Y)]
+        data = [initialize_data(input1=[x, varS, varG, varT, varF], output1=y) for x, y in zip(X, Y)]
 
         # Correct:
         

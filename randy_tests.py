@@ -15,7 +15,7 @@ while counter < 10:
     while True:
         print("======================================= Test", counter)
         rand_code = gen_rand_prefix_code(depth_limit=4)
-        rand_code = put_an_x_in_it(rand_code)
+        rand_code = populate_with_variables(rand_code)
         print("Prefix code:")
         parse_tree_print(parse_expression(rand_code))
         test_code = prefix_to_infix(rand_code)
