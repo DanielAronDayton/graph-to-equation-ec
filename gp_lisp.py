@@ -32,7 +32,7 @@ import numpy as np
 # Is there any modularity in adjacency?
 # What mechanisms capitalize on such modular patterns?
 OPERATORS = "+-/*^"
-VARIABLES = "x"#"xsgtf"
+VARIABLES = "xsgtf"
 
 MAX_ITERATIONS = 2000
 MAX_TIME_WITHOUT_IMPROVEMENT = 300
@@ -235,11 +235,11 @@ def gen_rand_prefix_code(depth_limit: int, rec_depth: int = 0, var_chance: float
                 + gen_rand_prefix_code(depth_limit, rec_depth, var_chance)
             )
         elif random.random() < var_chance:
-            return "x"
+            return random.choice(VARIABLES)
         else:
             return str(random.uniform(-20.0, 20.0))
     elif random.random() < var_chance:
-        return "x"
+        return random.choice(VARIABLES)
     else:
         return str(random.uniform(-20.0, 20.0))
 
@@ -776,7 +776,7 @@ if __name__ == "__main__":
     for i in range(10):
 
         if seed:
-            random.seed(30+i)
+            random.seed(35+i)
 
         print(divider)
         print("Cycle number: ", i + 1)
@@ -794,7 +794,7 @@ if __name__ == "__main__":
         repeat = True
         
         while repeat:
-            genome = gen_rand_prefix_code(depth_limit=4)
+            genome = gen_rand_prefix_code(depth_limit=5)
             genome = populate_with_variables(genome)
             ind1 = initialize_individual(genome, 0)
             repeat = False
