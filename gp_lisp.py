@@ -776,7 +776,7 @@ if __name__ == "__main__":
     for i in range(10):
 
         if seed:
-            random.seed(420+i)
+            random.seed(30+i)
 
         print(divider)
         print("Cycle number: ", i + 1)
@@ -792,6 +792,7 @@ if __name__ == "__main__":
 
         X = list(range(-10, 110, 10))
         repeat = True
+        
         while repeat:
             genome = gen_rand_prefix_code(depth_limit=4)
             genome = populate_with_variables(genome)
@@ -804,7 +805,7 @@ if __name__ == "__main__":
             except ZeroDivisionError:
                 repeat = True
             except FloatingPointError:
-                y = math.inf
+                repeat = True
         # data = [{"input1": x, "output1": y} for x, y in zip(X, Y)]
         # mypy wanted this:
         data = [initialize_data(input1=[x, varS, varG, varT, varF], output1=y) for x, y in zip(X, Y)]
