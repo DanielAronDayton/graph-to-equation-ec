@@ -22,9 +22,17 @@ from typing import Optional
 import random
 import math
 import numpy
+import sympy
 
 import requests
 import json
+import time
+import multiprocessing
+import os
+import ctypes
+
+import pickle
+# from multiprocessing import Process, Manager
 
 # import datetime
 # import subprocess
@@ -33,29 +41,51 @@ import json
 # First, what should our representation look like?
 # Is there any modularity in adjacency?
 # What mechanisms capitalize on such modular patterns?
-OPERATORS = "+-/*^"
-VARIABLES = "xsgtf"
+OPERATORS = "+-/*"
+VARIABLES = "xsgtfz"
 THROW_TYPES = ["bh1", "bh2", "bh3", "fh1", "fh2", "fh3"]
-DISC_IDS = ["1105", "566", "243", "574", "402", "348", "981"]#["1105", "566", "243", "991", "1173", "1228", "660", "788", "329", "779", "574", "402", "348", "981"]
-STARTING_POINTS = ["( + ( * ( / x 9.031515991700422 ) ( * ( + -2.151720022561741 f ) ( + g ( - ( + 14.222761143082238 ( / ( + 0.28913793978991253 ( * 5.202877215112656 16.129873997189623 ) ) ( * -8.982764366988988 ( / -9.805042530840135 4.158731039736966 ) ) ) ) ( - f 9.039572452420636 ) ) ) ) ) ( - s ( * 9.327831166869633 -16.532704823244007 ) ) )",
-                   "x",
-                   "x",
-                   "x",
-                   "x",
-                   "x"]
+EXTRA_INCLUDE_DISCS = ["566", "901", "348", "1473", "1228", "1418", "569"]
+THROW_VALUES = [0.5, 1, 2, -0.5, -1, -2]
+STARTING_POINTS = []
+# STARTING_POINTS = ["( / ( + ( * 0.00000008 ( * ( * x x ) ( * x x ) ) ) ( + ( * -0.00005 ( * ( * x x ) x ) ( + ( * 0.0022 ( * x x ) ) ( + ( * -0.1159 x ) 0.157 ) ) ) ) s )",
+#                    "( / ( + ( * 0.00000008 ( * ( * x x ) ( * x x ) ) ) ( + ( * -0.00005 ( * ( * x x ) x ) ( + ( * 0.0022 ( * x x ) ) ( + ( * -0.1159 x ) 0.157 ) ) ) ) ( * g s ) )",
+#                    "( * ( + x -13.33020662 ) ( / ( - t -0.6916947107793106 ) ( + 1.60724945 g ) ) )",
+#                    "( * ( / x ( / 10.527460278031175 s ) ) ( / ( + t ( / ( / x ( - s -16.20267838447866 ) ) 12.473110664082899 ) ) ( - s ( / x ( - ( / g -13.612437828992574 ) ( + f ( * -15.587341762831622 5.898199825906487 ) ) ) ) ) ) )",
+#                    "( / ( - ( * x ( + f t ) ) ( / x ( - 5.22950121933327 ( + ( + ( / 0.5424341939243978 -20.36314492693719 ) f ) s ) ) ) ) ( + 7.799210582665918 f ) )",
+#                    "( + ( / ( ^ g ( / ( / ( - x -16.758861668806883 ) 20.590543371048533 ) g ) ) ( - s -1.5583939877949127 ) ) ( * ( / ( + f x ) ( - f -17.483687805468257 ) ) t ) )",
+#                    "( + ( / ( ^ g ( / ( / ( - x -18.585200573306228 ) 20.508385901494847 ) g ) ) ( - s -1.8761568445068173 ) ) ( * ( / ( + f x ) ( - f ( - -4.269580602686558 f ) ) ) t ) )",
+#                    "( / ( - x ( * g 8.119253988229453 ) ) ( + ( + ( - 10.199344301353479 ( / x 15.238381846367316 ) ) g ) ( - s ( ^ f t ) ) ) )",
+#                    "( / ( + ( - ( * t x ) ( / ( * ( + x s ) s ) 17.041905716120535 ) ) ( ^ f ( / x ( * 8.04166262142913 g ) ) ) ) ( * f ( + f g ) ) )",
+#                    "( / ( - ( * x ( + t t ) ) ( / x g ) ) ( + 6.990199656711925 ( + s f ) ) )"
+#                    ]
 
-MAX_ITERATIONS = 2000
-MAX_TIME_WITHOUT_IMPROVEMENT = 300
-DEFAULT_POP_SIZE = 200
-DEFAULT_DEPTH = 2
-MAJOR_MUTATE_RATE_STEEPNESS = 200.0
-MINOR_MUTATE_RATE_STEEPNESS = 100.0
-RECOMBINE_RATE_STEEPNESS = 1000.0
-MUTATE_DEPTH = 4
+NUM_RAND_DISCS = 16
+MAX_ITERATIONS = 3000
+MAX_TIME_WITHOUT_IMPROVEMENT = 600
+DEFAULT_POP_SIZE = 500
+PARENT_PERCENTAGE = 1
+DEFAULT_DEPTH = 4
+POLYNOMIAL_DEGREE = 4
+MAJOR_MUTATE_RATE_STEEPNESS = 8.0
+MINOR_MUTATE_RATE_STEEPNESS = 20.0
+RECOMBINE_RATE_STEEPNESS = 8.0
+MUTATE_EARLY_STOP_CHANCE = 0.5
+MUTATE_VAR_CHANCE = 0.5
+MUTATE_AGAIN_MULTIPLIER = 0.85
+SIMPLIFY_CHANCE = 0
 SPONTANEOUS_PERCENTAGE = 0.1
-SPONTANEOUS_DEPTH = 4
+SPONTANEOUS_DEPTH = 5
 ERROR_PRECISION = 0.01
-GENOME_LEN_WEIGHT = 0.4
+GENOME_LEN_WEIGHT = 0.01
+GENOME_LEN_HARD_LIMIT = 500
+MISSING_VAR_COST = 50
+ROUNDING_DECIMALS = 5
+NUM_PROCS = 8 # os.cpu_count()
+
+USE_SEED = False
+USE_PYTHON_EVAL = True # Python's EVAL() function tends to be faster, but is more complex and can freeze sometimes on exponentiation
+USE_MULTIPROCESSING_FOR_EVAL = True
+USE_MULTIPROCESSING_FOR_MUTATE = False
 
 
 class Node:
@@ -77,11 +107,12 @@ class Node:
     """
 
     def __init__(
-        self, data: str, left: Optional["Node"] = None, right: Optional["Node"] = None
+        self, data: str, left: Optional["Node"] = None, right: Optional["Node"] = None, mutable: bool = True
     ) -> None:
         self.data = data
         self.left = left
         self.right = right
+        self.mutable = mutable
 
 
 class Individual(TypedDict):
@@ -135,7 +166,7 @@ def _parse_experession(code: list[str]) -> Node:
     Not intended for calling directly.
     Assumes code is prefix notation lisp with space delimeters.
     """
-    if code[0] in OPERATORS:
+    if code[0] in OPERATORS + "^":
         return Node(
             data=code.pop(0),
             left=_parse_experession(code),
@@ -160,19 +191,19 @@ def parse_tree_print(root: Node) -> None:
         print(f"{root.data} ", end="")
 
 
-def parse_tree_return(root: Node) -> str:
+def parse_tree_return_string(root: Node) -> str:
     """
     Stringifies to the tree data structure, returns string.
-    >>> stringified = parse_tree_return(root)
+    >>> stringified = parse_tree_return_string(root)
     """
     if root.right is not None and root.left is not None:
-        return f"( {root.data} {parse_tree_return(root.left)} {parse_tree_return(root.right)} )"
+        return f"( {root.data} {parse_tree_return_string(root.left)} {parse_tree_return_string(root.right)} )"
     else:
         # for the case of literal programs... e.g., `4`
         return root.data
+    
 
-
-def initialize_individual(genome: str, fitness: float) -> Individual:
+def initialize_individual(genome: str, fitness: float = 0) -> Individual:
     """
     Purpose:        Create one individual
     Parameters:     genome as Node, fitness as integer (higher better)
@@ -185,6 +216,20 @@ def initialize_individual(genome: str, fitness: float) -> Individual:
     >>> ind1 = initialize_individual("( + ( * C ( / 9 5 ) ) 32 )", 0)
     """
     return {"genome": parse_expression(genome), "fitness": fitness}
+
+def initialize_individual(genome: Node, fitness: float = 0) -> Individual:
+    """
+    Purpose:        Create one individual
+    Parameters:     genome as Node, fitness as integer (higher better)
+    User Input:     no
+    Prints:         no
+    Returns:        One Individual, as a dict[Node, int]
+    Modifies:       Nothing
+    Calls:          Basic python only
+    Example doctest:
+    >>> ind1 = initialize_individual("( + ( * C ( / 9 5 ) ) 32 )", 0)
+    """
+    return {"genome": genome, "fitness": fitness}
 
 
 def initialize_data(input1: list[float], output1: float) -> IOpair:
@@ -207,7 +252,7 @@ def prefix_to_infix(prefix: str) -> str:
     stack = []
     i = len(prefix_arr) - 1
     while i >= 0:
-        if prefix_arr[i] not in OPERATORS:
+        if prefix_arr[i] not in OPERATORS + "^":
             stack.append(prefix_arr[i])
             i -= 1
         else:
@@ -217,45 +262,71 @@ def prefix_to_infix(prefix: str) -> str:
     return stack.pop()
 
 
-def populate_with_variables(formula: str) -> str:
+def populate_with_variables(formula: str, vars: str = VARIABLES) -> str:
     formula_arr = formula.split()
-    for var in VARIABLES:
+    for var in vars:
         count = 0
-        while var == "x" or count < 50:
-            i = random.randint(0, len(formula_arr) - 1)
-            if formula_arr[i] not in OPERATORS and formula_arr[i] not in VARIABLES:
-                formula_arr[i] = var
-                break
-            count += 1
+        if var not in formula_arr:
+            while var == VARIABLES[0] and count < 50:
+                i = random.randint(0, len(formula_arr) - 1)
+                if formula_arr[i] not in OPERATORS and formula_arr[i] not in vars:
+                    formula_arr[i] = var
+                    break
+                count += 1
     return " ".join(formula_arr)
 
 
-def gen_rand_prefix_code(depth_limit: int, rec_depth: int = 0, var_chance: float = 0) -> str:
+def gen_rand_prefix_code(depth_limit: int, rec_depth: int = 0, stop_early_chance: float = 0.2, var_chance: float = 0) -> str:
     """
     Generates one small formula,
     from OPERATORS and ints from -100 to 200
     """
     rec_depth += 1
     if rec_depth < depth_limit:
-        if random.random() < 0.8:
+        if random.random() >= stop_early_chance:
             return (
                 random.choice(OPERATORS)
                 + " "
-                + gen_rand_prefix_code(depth_limit, rec_depth, var_chance)
+                + gen_rand_prefix_code(depth_limit, rec_depth, stop_early_chance, var_chance)
                 + " "
-                + gen_rand_prefix_code(depth_limit, rec_depth, var_chance)
+                + gen_rand_prefix_code(depth_limit, rec_depth, stop_early_chance, var_chance)
             )
         elif random.random() < var_chance:
             return random.choice(VARIABLES)
         else:
-            return str(random.uniform(-20.0, 20.0))
+            return str(numpy.round(random.uniform(-20.0, 20.0), ROUNDING_DECIMALS))
     elif random.random() < var_chance:
         return random.choice(VARIABLES)
     else:
-        return str(random.uniform(-20.0, 20.0))
+        return str(numpy.round(random.uniform(-20.0, 20.0), ROUNDING_DECIMALS))
 
 
-
+def gen_rand_polynomial(degree: int, depth_limit: int, rec_depth: int = 0, stop_early_chance: float = 0.2, var_chance: float = 0) -> Node:
+    if degree > 0:
+        root: Node = Node (
+            data="+",
+            left=Node(
+                data="*",
+                left=parse_expression(gen_rand_prefix_code(depth_limit=3, stop_early_chance=MUTATE_EARLY_STOP_CHANCE, var_chance=MUTATE_VAR_CHANCE)),
+                right=Node(
+                    data="^",
+                    left=parse_expression(populate_with_variables(gen_rand_prefix_code(depth_limit=3, stop_early_chance=MUTATE_EARLY_STOP_CHANCE, var_chance=MUTATE_VAR_CHANCE), VARIABLES[0])),
+                    right=Node(
+                        data=str(degree),
+                        left=None,
+                        right=None,
+                        mutable=False
+                    ),
+                    mutable=False
+                ),
+                mutable=False
+            ), # if degree > 1 else parse_expression(populate_with_variables(gen_rand_prefix_code(depth_limit=3, stop_early_chance=MUTATE_EARLY_STOP_CHANCE, var_chance=MUTATE_VAR_CHANCE), VARIABLES[0])),
+            right=gen_rand_polynomial(degree=degree-1, depth_limit=depth_limit, rec_depth=rec_depth, stop_early_chance=stop_early_chance, var_chance=var_chance),
+            mutable=False
+        )
+    else:
+        root: Node = parse_expression(gen_rand_prefix_code(depth_limit=3, stop_early_chance=MUTATE_EARLY_STOP_CHANCE, var_chance=MUTATE_VAR_CHANCE))
+    return root
 
 
 def initialize_pop(pop_size: int, depth: int = 2) -> Population:
@@ -271,10 +342,13 @@ def initialize_pop(pop_size: int, depth: int = 2) -> Population:
     """
     pop = []
     for i in range(pop_size):
-        genome = gen_rand_prefix_code(depth_limit=DEFAULT_DEPTH)
-        genome = populate_with_variables(genome)
+        # genome = gen_rand_prefix_code(depth_limit=DEFAULT_DEPTH)
+        # genome = populate_with_variables(genome)
+
         # for j in range(len(example_genome)):
         #    genome += random.choice(string.ascii_letters + " ")
+
+        genome = gen_rand_polynomial(degree=POLYNOMIAL_DEGREE, depth_limit=depth)
         pop.append(initialize_individual(genome, 0))
     return pop
 
@@ -294,9 +368,20 @@ def tree_len(root: Optional[Node]) -> int:
         result = 1 + tree_len(root.left) + tree_len(root.right)
     return result
 
+def tree_depth(root: Optional[Node]) -> int:
+    if root:
+        left = tree_depth(root.left)
+        right = tree_depth(root.right)
+        if left < right:
+            return right + 1
+        else:
+            return left + 1
+    else:
+        return 0
+    pass
 
 def tree_get_nth(
-    root: Optional[Node], n: int, current: list[int] = [-1]
+    root: Optional[Node], n: int
 ) -> Optional[Node]:
     """
     Purpose:        Get a reference to the nth node of a tree (in the form of a 1-length list), following pre-ordering
@@ -311,18 +396,22 @@ def tree_get_nth(
     Complaints:     I miss pointers
     """
 
-    if root:
-        current[0] += 1  # Increase the value of current to match what's being inspected
-        if current[0] == n:  # Return this node if it is the target
-            return root
-        else:  # If this is not the target, recurse this function on the left then right nodes
-            temp = tree_get_nth(root.left, n, current)
-            if current[0] < n:  # Calls to left node will increase current
-                temp = tree_get_nth(root.right, n, current)
-            return temp
-    else:  # If this node does not exist, return None without increasing current
-        return None
+    temp_node, _ = _tree_get_nth(root, n, 0)
+    return temp_node
 
+def _tree_get_nth(root: Optional[Node], n: int, current: int) -> tuple[Node, int]:
+    if root:
+        if current == n:
+            return root, current
+        temp_node, temp_num = _tree_get_nth(root.left, n, current + 1)
+        current = temp_num
+        if current == n:
+            return temp_node, current
+        temp_node, temp_num = _tree_get_nth(root.right, n, current + 1)
+        current = temp_num
+        return temp_node, current
+    else:
+        return None, current - 1
 
 def tree_set_nth(root: Node, value: Node, index: int) -> Optional[Node]:
     """
@@ -337,20 +426,21 @@ def tree_set_nth(root: Node, value: Node, index: int) -> Optional[Node]:
     Calls:          Basic python
     Complaints:     I miss pointers
     """
-
+    assert type(root) == Node
     return _tree_set_nth(root, value, index, 0)[0]
 
 
 def _tree_set_nth(
     root: Optional[Node], value: Node, index: int, count: int
 ) -> tuple[Optional[Node], int]:
+    assert (type(root) == Node or root == None)
     if root:
         if count == index:
             return (value, count)
         else:
             left, count = _tree_set_nth(root.left, value, index, count + 1)
             right, count = _tree_set_nth(root.right, value, index, count + 1)
-            return Node(data=root.data, left=left, right=right), count
+            return Node(data=root.data, left=left, right=right, mutable=root.mutable), count
     else:
         return None, count - 1
 
@@ -360,6 +450,7 @@ def tree_deep_copy(root: Optional[Node]) -> Optional[Node]:
             data=root.data,
             left=tree_deep_copy(root.left),
             right=tree_deep_copy(root.right),
+            mutable=root.mutable
         )
     else:
         return None
@@ -376,22 +467,44 @@ def tree_eval_node(root: Optional[Node], vars: list[float]) -> float:
             case '/':
                 return numpy.divide( tree_eval_node(root.left, vars), tree_eval_node(root.right, vars) )
             case '^':
-                if False: #tree_eval_node(root.left, vars) < 0: # Negative to the power of a fraction results in a complevars number, which I don't want
-                    test = -numpy.float_power(numpy.abs(tree_eval_node(root.left, vars)), tree_eval_node(root.right, vars))
-                else:
-                    test = numpy.float_power(tree_eval_node(root.left, vars), tree_eval_node(root.right, vars))
+                test = numpy.float_power(tree_eval_node(root.left, vars), tree_eval_node(root.right, vars))
                 if test == math.nan:
                     test = math.inf
                 return test
                 # return pow(tree_eval_node(root.left, vars), tree_eval_node(root.right, vars))
             case other:
-                if root.data in VARIABLES:
+                if str(root.data) in VARIABLES:
                     return vars[VARIABLES.find(root.data)]
                 else:
                     return float(root.data)
     pass
 
-def recombine_pair(parent1: Individual, parent2: Individual) -> Population:
+def tree_attempt_simplify(root: Optional[Node]) -> str:
+    if root:
+        if str(root.data) in VARIABLES:
+            return "var"
+        elif str(root.data) in OPERATORS:
+            left = tree_attempt_simplify(root.left)
+            right = tree_attempt_simplify(root.right)
+            if left == "num" and right == "num":
+                try:
+                    root.data = str(tree_eval_node(root, [])) # I can only do this because I know the function won't attempt to use the vars parameter
+                except FloatingPointError:
+                    pass
+                root.left = None
+                root.right = None
+                return "num"
+            else: # TODO: Simplify more cases too
+                return "opr"
+        else:
+            return "num"        
+    else:
+        return "nul"
+
+def tree_polynomial_get_term(root: Optional[Node], term: int):
+    pass
+
+def recombine_pair(parent1: Individual, parent2: Individual, rate: float) -> Population:
     """
     Purpose:        Recombine two parents to produce two children
     Parameters:     Two parents as Individuals
@@ -403,28 +516,98 @@ def recombine_pair(parent1: Individual, parent2: Individual) -> Population:
     Example doctest:
     """
 
-    genomeLen1 = tree_len(parent1["genome"])
-    genomeLen2 = tree_len(parent2["genome"])
+    # This new (uncommment) recombination code will swap the nth degree term of on parent with the nth degree term of another parent
+    # This part relies on the genomes being very specifically formatted polynomials of equal length
+    # If I add functionality for increasing the degree of the polynomial with mutation, this would need to change
+    # TODO: Make this code safer
+    # TODO: Maybe swap the entire term at once, not just one part?
 
-    index1 = random.randint(0, genomeLen1)
-    index2 = random.randint(0, genomeLen2)
+    genome1: Node = tree_deep_copy(parent1["genome"])
+    genome2: Node = tree_deep_copy(parent2["genome"])
 
-    subtree1 = tree_get_nth(parent1["genome"], index1)
-    subtree2 = tree_get_nth(parent2["genome"], index2)
+    current1: Node = genome1
+    current2: Node = genome2
+    
+    for _ in range(POLYNOMIAL_DEGREE):
+        # x^(POLYNOMIAL_DEGREE-i)'th term
+        if random.random() < rate:
+            subtree1: Node = current1.left
+            subtree2: Node = current2.left
 
-    if subtree1 and subtree2:
-        genome1 = tree_set_nth(parent1["genome"], subtree2, index2)
-        genome2 = tree_set_nth(parent2["genome"], subtree1, index1)
+            copy: Node = Node(
+                data = subtree1.data,
+                left = subtree1.left,
+                right = subtree1.right,
+                mutable = subtree1.mutable
+            )
 
-        if genome1 and genome2:
-            return [
-                initialize_individual(parse_tree_return(genome1), 0),
-                initialize_individual(parse_tree_return(genome2), 0),
-            ]
+            subtree1.data = subtree2.data
+            subtree1.left = subtree2.left
+            subtree1.right = subtree2.right
+            subtree1.mutable = subtree2.mutable
+
+            subtree2.data = copy.data
+            subtree2.left = copy.left
+            subtree2.right = copy.right
+            subtree2.mutable = copy.mutable
+
+        current1 = current1.right
+        current2 = current2.right
+
+    # x^0'th term
+    if random.random() < rate:
+        copy: Node = Node(
+            data = current1.data,
+            left = current1.left,
+            right = current1.right,
+            mutable = current1.mutable
+        )
+
+        current1.data = current2.data
+        current1.left = current2.left
+        current1.right = current2.right
+        current1.mutable = current2.mutable
+
+        current2.data = copy.data
+        current2.left = copy.left
+        current2.right = copy.right
+        current2.mutable = copy.mutable
+
     return [
-        initialize_individual(parse_tree_return(parent1["genome"]), 0),
-        initialize_individual(parse_tree_return(parent2["genome"]), 0),
+        initialize_individual(genome1, 0),
+        initialize_individual(genome2, 0)
     ]
+
+    # genomeLen1 = tree_len(parent1["genome"])
+    # genomeLen2 = tree_len(parent2["genome"])
+
+    # while True:
+
+    #     index1 = random.randint(0, genomeLen1 - 1)
+    #     index2 = random.randint(0, genomeLen2 - 1)
+
+    #     subtree1 = tree_get_nth(root=parent1["genome"], n=index1)
+    #     subtree2 = tree_get_nth(root=parent2["genome"], n=index2)
+
+    #     assert(subtree1)
+    #     assert(subtree2)
+    #     if (subtree1.mutable and subtree2.mutable):
+
+    #         genome1 = tree_set_nth(parent1["genome"], subtree2, index2)
+    #         genome2 = tree_set_nth(parent2["genome"], subtree1, index1)
+
+    #         assert (type(genome1) == Node or genome1 == None)
+    #         assert (type(genome2) == Node or genome2 == None)
+
+    #         if genome1 and genome2:
+    #             return [
+    #                 initialize_individual(parse_tree_return_string(genome1), 0),
+    #                 initialize_individual(parse_tree_return_string(genome2), 0),
+    #             ]
+    #         return [
+    #             initialize_individual(parse_tree_return_string(parent1["genome"]), 0),
+    #             initialize_individual(parse_tree_return_string(parent2["genome"]), 0),
+    #         ]
 
 
 def recombine_group(parents: Population, recombine_rate: float) -> Population:
@@ -447,11 +630,11 @@ def recombine_group(parents: Population, recombine_rate: float) -> Population:
 
     for i in range(int(len(parents))):  # [0 : len(parents) - 1 : 2]:
 
-        if random.random() < recombine_rate:
-            temp = recombine_pair(parents[i], random.choices(parents, weights=weights, k=1)[0])
-            pop += temp
-        else:
-            pop.append(parents[i])
+        # if random.random() < recombine_rate:
+        temp = recombine_pair(parents[i], random.choices(parents, weights=weights, k=1)[0], recombine_rate)
+        pop += temp
+        # else:
+        #     pop.append(parents[i])
             # pop.append(parents[i + int(len(parents) / 2)])
         # for j in range(len(parents))[i + 1 :]:
         #    if random.random() < recombine_rate:
@@ -474,37 +657,30 @@ def major_mutate_individual(parent: Individual, mutate_rate: float) -> Individua
     Calls:          Basic python, random,choice-1,
     Example doctest:
     """
-    # TODO: Add subtle mutation and change depth limit to current node depth + 1
-    # as_string = parse_tree_return(parent["genome"])
+    # TODO: USe similar code to recombine_pair
+    # as_string = parse_tree_return_string(parent["genome"])
     new_genome: Optional[Node] = tree_deep_copy(parent["genome"])
     while random.random() < mutate_rate:
-        # new_genome = parse_expression(as_string)
-        genome_len = tree_len(new_genome)
-        n = random.randint(0, genome_len)
-        # subtree = tree_get_nth(genome_copy, n)
-        new_genome = tree_set_nth(
-            new_genome, parse_expression(gen_rand_prefix_code(depth_limit=MUTATE_DEPTH, var_chance=0.25)), n
-        )
+        while True:
+            # new_genome = parse_expression(as_string)
+            genome_len = tree_len(new_genome)
 
-        # if new_genome:
-        #     as_string = parse_tree_return(new_genome)
-        #     num_x = as_string.count("x")
-        #     if num_x == 0:
-        #         as_string = put_an_x_in_it(as_string)
-        #     elif num_x > 1:
-        #         preserve = random.randint(0, num_x)
-        #         instances = 0
-        #         as_arr = as_string.split()
-        #         for i in range(num_x):
-        #             if as_arr[i] == "x":
-        #                 if instances != preserve:
-        #                     as_arr[i] = gen_rand_prefix_code(2)
-        #                 instances += 1
-        #         as_string = "".join(as_arr)
-        mutate_rate *= 0.8
+            if genome_len > GENOME_LEN_HARD_LIMIT:
+                return {"genome": new_genome, "fitness": math.inf}
+            else:
+                n = random.randint(0, genome_len - 1)
 
-        # print("Debug1 ----", parse_tree_return(parent["genome"]))
-        # print("Debug2 ====", as_string)
+                if random.random() < SIMPLIFY_CHANCE:
+                    tree_attempt_simplify(tree_get_nth(root=new_genome, n=n))
+                else:
+                    subtree = tree_get_nth(root=new_genome, n=n)
+                    assert(subtree)
+                    if subtree.mutable:
+                        new_genome = tree_set_nth(
+                            new_genome, parse_expression(gen_rand_prefix_code(depth_limit=2, stop_early_chance=MUTATE_EARLY_STOP_CHANCE, var_chance=MUTATE_VAR_CHANCE)), n
+                        )
+                        mutate_rate *= MUTATE_AGAIN_MULTIPLIER
+                        break
 
     return {"genome": new_genome, "fitness": 0}
 
@@ -520,20 +696,27 @@ def minor_mutate_individual (parent: Individual, mutate_rate: float) -> Individu
     Example doctest:
     TODO: Change function descriptions to be accurate
     """
-    # TODO: Add subtle mutation and change depth limit to current node depth + 1
-    # as_string = parse_tree_return(parent["genome"])
     new_genome: Optional[Node] = tree_deep_copy(parent["genome"])
     genome_len = tree_len(new_genome)
-    for i in range(genome_len):
-        # new_genome = parse_expression(as_string)
-        
-        # subtree = tree_get_nth(genome_copy, n)
+    
+    if genome_len > GENOME_LEN_HARD_LIMIT:
+        return {"genome": new_genome, "fitness": math.inf}
+    else:
+        for i in range(genome_len):
+            temp_node = tree_get_nth(root=new_genome, n=i)
+            assert(temp_node)
+            if temp_node.mutable:
+                node_data = str(temp_node.data)
+                if (node_data in OPERATORS):
+                    if (random.random() < mutate_rate / 4.0):
+                        temp_node.data = random.choice(OPERATORS)
+                elif (node_data in VARIABLES):
+                    if (random.random() < mutate_rate / 4.0):
+                        temp_node.data = random.choice(VARIABLES)
+                elif (random.random() < mutate_rate):
+                    temp_node.data = str(numpy.round(float(temp_node.data) + random.uniform(-mutate_rate, mutate_rate) * 10.0, ROUNDING_DECIMALS))
 
-        temp_node = tree_get_nth(root=new_genome, n=i, current=[-1])
-        if (random.random() < mutate_rate and temp_node.data not in OPERATORS and temp_node.data not in VARIABLES):
-            temp_node.data = str(float(temp_node.data) + random.uniform(-mutate_rate, mutate_rate))
-
-    return {"genome": new_genome, "fitness": 0}
+        return {"genome": new_genome, "fitness": 0}        
 
 
 def mutate_group(children: Population, minor_mutate_rate: float, major_mutate_rate: float) -> Population:
@@ -547,16 +730,29 @@ def mutate_group(children: Population, minor_mutate_rate: float, major_mutate_ra
     Calls:          Basic python, mutate_individual-n
     Example doctest:
     """
-    pop = []
-    # i = 0
-    for child in children:
-        # i += 1
-        pop.append(minor_mutate_individual( major_mutate_individual(child, major_mutate_rate), minor_mutate_rate ))  #  * (i / len(children))
+
+    if USE_MULTIPROCESSING_FOR_MUTATE:
+        pop = [None] * len(children)
+        
+        # i = 0
+
+        procs = [multiprocessing.Process(target=_mutate, args=(pop, children[i], i, minor_mutate_rate, major_mutate_rate,)) for i in range(len(children))]
+        for t in procs:
+            t.start()
+        for t in procs:
+            t.join()
+
+    else:
+        pop = []
+        for child in children:
+            # i += 1
+            pop.append(minor_mutate_individual( major_mutate_individual(child, major_mutate_rate), minor_mutate_rate ))  #  * (i / len(children))
 
 
     return pop
 
-
+def _mutate (pop: Population, child: Individual, index: int, minor_mutate_rate: float, major_mutate_rate: float) -> None:
+    pop[index] = minor_mutate_individual( major_mutate_individual(child, major_mutate_rate), minor_mutate_rate )
 
 def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
     """
@@ -571,65 +767,96 @@ def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
     Example doctest:
     >>> evaluate_individual(ind1, io_data)
     """
+    if individual["fitness"] == math.inf:
+        return # This should only happen if the tree has a length above the hard cutoff
+    numpy.seterr(all="raise")
     fitness = 0
-    errors = []
-    base_eval_string = parse_tree_return(individual["genome"])
+
+    # Enforce that this MUST be a polynomial
+    current: Node = individual["genome"]
+    for _ in range(POLYNOMIAL_DEGREE):
+        # x^(POLYNOMIAL_DEGREE-i)'th term
+        subtree: Node = current.left
+
+        subtree_arr = parse_tree_return_string(subtree.right.left).split()
+        x_count = 0
+
+        # Don't let it have more than one x, otherwise it'll do x-x
+        for c in range(len(subtree_arr)):
+            if subtree_arr[c] == VARIABLES[0]:
+                x_count += 1
+                if x_count > 1:
+                    subtree_arr[c] = str(numpy.round(random.uniform(-20.0, 20.0), ROUNDING_DECIMALS))
+                    break
+
+        if x_count != 1:
+            subtree_str = "".join(subtree_arr)
+            subtree.right.left = parse_expression(populate_with_variables(subtree_str, VARIABLES[0]))
+        # if "x" not in subtree_str:
+            # individual["fitness"] = math.inf
+            # return
+        current = current.right
+    
+    # Enforce maximum length restriction
+    length = tree_len(individual["genome"])
+    if length > GENOME_LEN_HARD_LIMIT:
+        fitness = math.inf
+        return
+
+    errors: list[float] = []
+    eval_string = parse_tree_return_string(individual["genome"])
     for sub_eval in io_data:
-        if 0:
-            # TODO: Fix or delete this
-            eval_string = base_eval_string.replace("x", str(sub_eval["input1"][0]))
+        try:
+            # TODO: Support trig functions
 
-            # In clojure, this is really slow with subprocess
-            # eval_string = "( float " + eval_string + ")"
-            # returnobject = subprocess.run(
-            #     ["clojure", "-e", eval_string], capture_output=True
-            # )
-            # result = float(returnobject.stdout.decode().strip())
+            if USE_PYTHON_EVAL:
+                as_list = eval_string.split()
+                for v in range(len(VARIABLES)):
+                    for x in range(len(as_list)):
+                        if as_list[x] == VARIABLES[v]:
+                            as_list[x] = str(sub_eval["input1"][v])
+                new_eval_string = prefix_to_infix(" ".join(as_list)).replace("^", "**")
+                y = eval(new_eval_string)
+                if numpy.iscomplexobj(y) or numpy.isnan(float(y)):
+                    errors = [math.inf]
+                    break
 
-            # In python, this is MUCH MUCH faster:
-            try:
-                y = eval(prefix_to_infix(eval_string).replace("^", "**"))
-            except OverflowError:
-                y = math.inf
-            except ZeroDivisionError:
-                y = math.inf
-
-            try:
-                errors.append(abs(sub_eval["output1"] - y))
-            except OverflowError:
-                errors.append(math.inf)
-        else:
-            try:
+            else:
                 y = tree_eval_node(individual["genome"], sub_eval["input1"])
-            # except OverflowError:
-            #     y = math.inf
-            # except ZeroDivisionError:
-            #     y = math.inf
-            except FloatingPointError:
-                y = math.inf
+            errors.append(abs(sub_eval["output1"] - y))
+        except OverflowError:
+            errors = [math.inf]
+            break
+        except ZeroDivisionError:
+            errors = [math.inf]
+            break
+        except FloatingPointError:
+            errors = [math.inf]
+            break
 
-            try:
-                errors.append(abs(sub_eval["output1"] - y))
-            except OverflowError:
-                errors.append(math.inf)
-    # Higher errors is bad, longer strings is bad, and more than 1 x is bad (For now)
+    # Higher errors is bad, longer strings is bad
+    error_sum: float
     try:
-        errors = sum(errors)
+        error_sum = numpy.sum(errors) / len(io_data)
     except FloatingPointError:
-        errors = math.inf
+        error_sum = math.inf
 
-    if errors < ERROR_PRECISION:
+    if error_sum < ERROR_PRECISION:
         fitness = 1
     else:
-        fitness = 1 + errors + tree_len(individual["genome"]) * GENOME_LEN_WEIGHT # + len(eval_string.split()) * 0.1
+        # Tally results and punish longer genomes
+        fitness = 1 + error_sum + length * GENOME_LEN_WEIGHT # + len(eval_string.split()) * 0.1
+
+        # Punish the genome for not including variables
+        for v in VARIABLES[1::]:
+            if v not in eval_string:
+                fitness += MISSING_VAR_COST
+
     # Higher fitness is worse
     individual["fitness"] = fitness
 
 
-
-
-
-def evaluate_group(individuals: Population, io_data: IOdata) -> None:
+def evaluate_group(individuals: Population, io_data: IOdata) -> Population:
     """
     Purpose:        Computes and modifies the fitness for population
     Parameters:     Objective string, Population
@@ -640,9 +867,44 @@ def evaluate_group(individuals: Population, io_data: IOdata) -> None:
     Calls:          Basic python, evaluate_individual-n
     Example doctest:
     """
-    for i in individuals:
-        evaluate_individual(i, io_data)
 
+    if USE_MULTIPROCESSING_FOR_EVAL:
+        procs = []
+        ilen = len(individuals)
+        out_queue = multiprocessing.Queue()
+        for x in range(NUM_PROCS):
+            procs.append (multiprocessing.Process(target=_eval_group, args=(individuals[math.floor( ilen / NUM_PROCS * x ) : math.floor( ilen / NUM_PROCS * (x+1) )], io_data, out_queue)))
+        for t in procs:
+            t.start()
+        individuals = []
+        for t in range(ilen):
+            while True:
+                try:
+                    individuals.append(out_queue.get(timeout=0.01))
+                    # print("Adding " + str(t) + " with fitness " + str(individuals[-1]["fitness"]))
+                    break
+                except Exception as e:
+                    pass
+        # print("Exiting while loop")
+        for t in procs:
+            t.join()    
+        
+    else:
+        for i in individuals:
+            evaluate_individual(i, io_data)
+
+    return individuals
+
+def _eval_group(individuals: Population, io_data: IOdata, queue: multiprocessing.Queue):
+    for i in range(len(individuals)) :
+        evaluate_individual(individuals[i], io_data)
+        while queue.qsize() > len(individuals):
+            pass
+        # print("Inserting into queue")
+        queue.put(individuals[i])
+    # queue.put(individuals)
+    queue.close()
+    return
 
 def rank_group(individuals: Population) -> None:
     """
@@ -678,7 +940,13 @@ def parent_select(individuals: Population, number: int) -> Population:
     for i in individuals:
         weights.append(100.0 / i["fitness"])
 
-    return random.choices(individuals, weights=weights, k=number)
+    result = []
+
+    for i in range(int(number)):
+        result.append(random.choices(individuals, weights=weights, k=1)[0])
+
+    # return random.choices(individuals, weights=weights, k=number)
+    return result
 
 
 def survivor_select(individuals: Population, pop_size: int) -> Population:
@@ -695,7 +963,7 @@ def survivor_select(individuals: Population, pop_size: int) -> Population:
     return individuals[0:pop_size]
 
 
-def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE, starting_point: str = VARIABLES[0]) -> Population:
+def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE, saved_genomes: Node = []) -> Population:
     """
     Purpose:        A whole EC run, main driver
     Parameters:     The evolved population of solutions
@@ -712,13 +980,19 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE, starting_point: st
     # Type 'n' to 'next' over
     # Type 'f' or 'r' to finish/return a function call and go back to caller
     population = initialize_pop(pop_size=pop_size)
-    population.append(initialize_individual(starting_point, 0))
-    evaluate_group(individuals=population, io_data=io_data)
+    for starting_point in STARTING_POINTS:
+        population = [initialize_individual(starting_point, 0)] + population
+    for saved in saved_genomes:
+        population = [initialize_individual(saved, 0)] + population
+    population = evaluate_group(individuals=population, io_data=io_data)
     rank_group(individuals=population)
     best_fitness = population[0]["fitness"]
     goal_fitness = 1
     time_without_improvement = 0
     i = 0
+    start: float
+    end: float
+    time_data = []
 
     print(
         "Iteration number",
@@ -726,27 +1000,57 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE, starting_point: st
         "with fitness",
         best_fitness,
         "and best individual =",
-        parse_tree_return(population[0]["genome"]),
+        parse_tree_return_string(population[0]["genome"]),
     )
 
     while best_fitness > goal_fitness and i < MAX_ITERATIONS and time_without_improvement < MAX_TIME_WITHOUT_IMPROVEMENT:
         # mutate_rate = math.log(best_fitness + 1 + time_without_improvement) / 2
-        major_mutate_rate = (best_fitness) / (best_fitness + MAJOR_MUTATE_RATE_STEEPNESS)
-        minor_mutate_rate = (best_fitness) / (best_fitness + MINOR_MUTATE_RATE_STEEPNESS)
-        recombine_rate = (best_fitness) / (best_fitness + RECOMBINE_RATE_STEEPNESS)
+        time_data = []
+        start = time.time()
+        major_mutate_rate = (best_fitness) / (best_fitness + (MAJOR_MUTATE_RATE_STEEPNESS))
+        minor_mutate_rate = (best_fitness) / (best_fitness + (MINOR_MUTATE_RATE_STEEPNESS))
+        recombine_rate = ((best_fitness) / (best_fitness + (RECOMBINE_RATE_STEEPNESS))) / 2
+        end = time.time()
+        time_data.append(end - start)
 
-        spontaneous = initialize_pop(pop_size=(int)(pop_size * SPONTANEOUS_PERCENTAGE), depth=4)
-        evaluate_group(individuals=spontaneous, io_data=io_data)
-        parents = parent_select(individuals=population, number=pop_size) + spontaneous
+        start = time.time()
+        spontaneous = initialize_pop(pop_size=(int)(pop_size * SPONTANEOUS_PERCENTAGE), depth=SPONTANEOUS_DEPTH)
+        spontaneous = evaluate_group(individuals=spontaneous, io_data=io_data)
+        end = time.time()
+        time_data.append(end - start)
+
+        start = time.time()
+        parents = parent_select(individuals=population, number=pop_size*PARENT_PERCENTAGE)
         rank_group(parents)
-        children = recombine_group(parents=parents, recombine_rate=recombine_rate)
-        mutants = mutate_group(children=children, minor_mutate_rate=minor_mutate_rate, major_mutate_rate=major_mutate_rate)
-        evaluate_group(individuals=mutants, io_data=io_data)
-        everyone = population + mutants
-        rank_group(individuals=everyone)
+        end = time.time()
+        time_data.append(end - start)
 
-        # print("\t\tDEBUG DEBUG", everyone[0]["fitness"], parse_tree_return(population[0]["genome"]))
+        start = time.time()
+        children = recombine_group(parents=parents, recombine_rate=recombine_rate)
+        end = time.time()
+        time_data.append(end - start)
+
+        start = time.time()
+        mutants = mutate_group(children=children, minor_mutate_rate=minor_mutate_rate, major_mutate_rate=major_mutate_rate)
+        end = time.time()
+        time_data.append(end - start)
+
+        start = time.time()
+        mutants = evaluate_group(individuals=mutants, io_data=io_data)
+        end = time.time()
+        time_data.append(end - start)
+
+        start = time.time()
+        everyone = population + mutants + spontaneous
+        rank_group(individuals=everyone)
+        end = time.time()
+        time_data.append(end - start)
+
+        start = time.time()
+        # print("\t\tDEBUG DEBUG", everyone[0]["fitness"], parse_tree_return_string(population[0]["genome"]))
         population = survivor_select(individuals=everyone, pop_size=pop_size)
+        end = time.time()
+        time_data.append(end - start)
         i += 1
 
         if best_fitness != population[0]["fitness"]:
@@ -757,11 +1061,30 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE, starting_point: st
                 "with fitness",
                 best_fitness,
                 "and best individual =",
-                parse_tree_return(population[0]["genome"]),
+                parse_tree_return_string(population[0]["genome"]),
             )
+            file = open("results.txt", "a")
+            file.writelines(
+                "\nIteration number " +
+                str(i) +
+                " with fitness " +
+                str(best_fitness) +
+                " and best individual = " +
+                parse_tree_return_string(population[0]["genome"]) + 
+                "\n\t>Infix = " + prefix_to_infix(parse_tree_return_string(population[0]["genome"])) + "\n"
+            )
+            file.close()
+            if len(saved_genomes) > 0:
+                saved_genomes[-1] = (tree_deep_copy(population[0]["genome"]))
+            else:
+                saved_genomes.append(tree_deep_copy(population[0]["genome"]))
+            with open("polynomial-results-" + str(POLYNOMIAL_DEGREE) + ".pkl", "wb") as output:
+                for node in saved_genomes:
+                    pickle.dump(node, output, pickle.HIGHEST_PROTOCOL)
             time_without_improvement = 0
         else:
             time_without_improvement += 1
+        print("\t>>Iteration ", i, "timing data: ", time_data)
 
     print(
         "Completed with",
@@ -771,14 +1094,45 @@ def evolve(io_data: IOdata, pop_size: int = DEFAULT_POP_SIZE, starting_point: st
         "without improvement ) and a final fitness of",
         population[0]["fitness"],
     )
+    file = open("results.txt", "a")
+    file.writelines(
+        "Completed with " +
+        str(i) +
+        " iterations (" +
+        str(time_without_improvement) +
+        " without improvement) and a final fitness of " +
+        str(population[0]["fitness"])
+    )
+    file.close()
+    saved_genomes.append(tree_deep_copy(population[0]["genome"]))
+    # TODO: Find out how to append to pickle?
+    with open("polynomial-results-" + str(POLYNOMIAL_DEGREE) + ".pkl", "wb") as output:
+        for node in saved_genomes:
+            pickle.dump(node, output, pickle.HIGHEST_PROTOCOL)
     return population
 
-
-# Seed for base grade.
-# For the exploratory competition points (last 10),
-# comment this one line out if you want, but put it back please.
-seed = False
-
+def download_disc(disc: str, flipflop: bool) -> tuple[IOdata, bool]:
+    response = requests.get('https://flightcharts.dgputtheads.com/discdata/' + disc)
+    print("Importing data for disc ", disc)
+    data = json.loads(response.text)["data"]
+    result: list[IOdata] = []
+    if response.ok and data != '""':
+        data = json.loads(data)
+        speed = data["speed"]
+        glide = data["glide"]
+        turn = data["turn"]
+        fade = data["fade"]
+        flipflop = not flipflop
+        
+        for i in range(len(THROW_TYPES)):
+            for point in data[THROW_TYPES[i]][flipflop::2]:
+                result.append(initialize_data([point["y"], speed, glide, turn, fade, THROW_VALUES[i]], point["x"] * 100.0)) # I multiply x by 100 to make it clearer. It is a percentage
+                print("\t> ", result[-1])
+        return result, flipflop
+    else:
+        print("** Failed to import data for disc ", disc, " **")
+        raise Exception("Failed to import disc")
+    
 
 if __name__ == "__main__":
     divider = "===================================================="
@@ -788,47 +1142,69 @@ if __name__ == "__main__":
     # doctest.testmod()
     # doctest.testmod(verbose=True)
 
-    numpy.seterr(all="raise")
+    saved_genomes = []
+    flipflop = 0
+    with open("polynomial-results-" + str(POLYNOMIAL_DEGREE) + ".pkl", "rb") as input:
+        while True:
+            try:
+                temp = pickle.load(input)
+                print("Importing node from file: ", parse_tree_return_string(temp))
+                saved_genomes.append(temp)
+            except EOFError:
+                print("End of file")
+                break
 
-    for i in range(len(THROW_TYPES)):
+    
+    print("\n\n" + divider +
+        "\nStarting a new run: Polynomial of degree " + str(POLYNOMIAL_DEGREE) +
+        "\nLower fitness is better:\n\n")
+    file = open("results.txt", "a")
+    file.writelines(
+        divider +
+        "\nStarting a new run: Polynomial of degree " + str(POLYNOMIAL_DEGREE) +
+        "\nLower fitness is better:\n\n"
+    )
+    file.close()
+    if USE_SEED:
+        random.seed(42)
 
-        if seed:
-            random.seed(35+i)
+    all_data = []
 
-        print(divider)
-        print("Throw type: ", THROW_TYPES[i])
-        print("Lower fitness is better.")
-        print(divider)
-
-        all_data = []
-
-        for disc in DISC_IDS:
-            response = requests.get('https://flightcharts.dgputtheads.com/discdata/' + disc)
-            if response.ok:
-                data = json.loads(json.loads(response.text)["data"])
-                speed = data["speed"]
-                glide = data["glide"]
-                turn = data["turn"]
-                fade = data["fade"]
-                for point in data[THROW_TYPES[i]]:
-                    all_data.append(initialize_data([point["x"], speed, glide, turn, fade], point["y"]))
-                print("Importing data for disc ", disc, ", ", all_data[len(all_data) - 1])
-            else:
-                print("** Failed to import data for disc ", disc, " **")
-
+    # Import random discs
+    for x in range(NUM_RAND_DISCS):
+        while True:
+            try:
+                disc = str(random.randint(1, 1600))
+                temp, flipflop = download_disc(disc, flipflop)
+                all_data += temp
+                break
+            except Exception as e:
+                if e.args[0] == 'Failed to import disc':
+                    pass
+                else:
+                    raise e
         
-        # train = all_data[: int(len(all_data) / 2)]
-        # test = all_data[int(len(all_data) / 2) :]
-        population = evolve(all_data, starting_point = STARTING_POINTS[i])
-        evaluate_individual(population[0], all_data)
-        population[0]["fitness"]
+    # Import specific discs
+    for disc in EXTRA_INCLUDE_DISCS:
+        temp, flipflop = download_disc(disc, flipflop)
+        all_data += temp
+            
 
-        print(divider)
+    # train = all_data[: int(len(all_data) / 2)]
+    # test = all_data[int(len(all_data) / 2) :]
+    file.close()
+    population = evolve(all_data, DEFAULT_POP_SIZE, saved_genomes)
+    evaluate_individual(population[0], all_data)
+    population[0]["fitness"]
 
-        print("Here is the best program:")
-        parse_tree_print(population[0]["genome"])
-        print("And as infix:")
-        print(prefix_to_infix(parse_tree_return(population[0]["genome"])))
-        print("And it's fitness:")
-        print(population[0]["fitness"])
+    print(divider)
 
+    print("Here is the best program:")
+    parse_tree_print(population[0]["genome"])
+    print("And as infix:")
+    print(prefix_to_infix(parse_tree_return_string(population[0]["genome"])))
+    print("And it's fitness:")
+    print(population[0]["fitness"])
+
+
+# %%
