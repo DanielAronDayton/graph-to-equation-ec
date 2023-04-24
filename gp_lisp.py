@@ -43,9 +43,9 @@ import pickle
 # What mechanisms capitalize on such modular patterns?
 OPERATORS = "+-/*"
 VARIABLES = "xsgtfz"
-THROW_TYPES = ["bh1", "bh2", "bh3", "fh1", "fh2", "fh3"]
+THROW_TYPES = ["bh1", "bh2", "bh3"] #["bh1", "bh2", "bh3", "fh1", "fh2", "fh3"]
 EXTRA_INCLUDE_DISCS = ["566", "901", "348", "1473", "1228", "1418", "569"]
-THROW_VALUES = [0.5, 1, 2, -0.5, -1, -2]
+THROW_VALUES = [0.5, 1, 2]#[0.5, 1, 2, -0.5, -1, -2]
 STARTING_POINTS = []
 # STARTING_POINTS = ["( / ( + ( * 0.00000008 ( * ( * x x ) ( * x x ) ) ) ( + ( * -0.00005 ( * ( * x x ) x ) ( + ( * 0.0022 ( * x x ) ) ( + ( * -0.1159 x ) 0.157 ) ) ) ) s )",
 #                    "( / ( + ( * 0.00000008 ( * ( * x x ) ( * x x ) ) ) ( + ( * -0.00005 ( * ( * x x ) x ) ( + ( * 0.0022 ( * x x ) ) ( + ( * -0.1159 x ) 0.157 ) ) ) ) ( * g s ) )",
@@ -80,7 +80,7 @@ GENOME_LEN_WEIGHT = 0.01
 GENOME_LEN_HARD_LIMIT = 500
 MISSING_VAR_COST = 50
 ROUNDING_DECIMALS = 5
-NUM_PROCS = 8 # os.cpu_count()
+NUM_PROCS = 4 # os.cpu_count()
 
 USE_SEED = False
 USE_PYTHON_EVAL = True # Python's EVAL() function tends to be faster, but is more complex and can freeze sometimes on exponentiation
